@@ -69,7 +69,9 @@ function defaultState() {
 }
 
 let state = loadState();
-const ui = { onboardStep: 0, onboardChoice: 'today', onboardCustomDate: '', pauseStep: 0, openArc: null, reviewExerciseOpen: false, liftDays: { M: true, T: false, W: true, T2: false, F: true, S: false, S2: false } };
+const ui = { onboardStep: 0, onboardChoice: 'today', onboardCustomDate: '', pauseStep: 0, pauseTimer: null, openArc: null, reviewExerciseOpen: false, liftDays: { M: true, T: false, W: true, T2: false, F: true, S: false, S2: false } };
+const PAUSE_TOTAL_MS = 90000;
+const PAUSE_STEP_MS = PAUSE_TOTAL_MS / 5;
 
 function loadState() {
   try {
@@ -88,10 +90,24 @@ function saveState() {
 
 function getLog(dateKey) {
   if (!state.logs[dateKey]) {
-    state.logs[dateKey] = { water: 'undone', meal: 'undone', pages: 'undone', gratitude: 'undone', walk: 'undone', cold: 'undone', pause: 'undone', journal: {} };
+    state.logs[dateKey] = { water: 'undone', meal: 'undone', pages: 'undone', gratitude: 'undone', walk: 'undone', cold: 'undone', pause: 'undone', pauseCount: 0, journal: {} };
   }
   if (!state.logs[dateKey].journal) state.logs[dateKey].journal = {};
+  if (typeof state.logs[dateKey].pauseCount !== 'number') state.logs[dateKey].pauseCount = 0;
   return state.logs[dateKey];
+}
+
+/** Recomputes the gratitude item's status from the three Vitamin G fields.
+ * Filling all three auto-marks it done (even overriding a prior compassionate mark);
+ * clearing one back out reverts an auto-set 'done' to 'undone', but never touches
+ * a manually-set compassionate mark made without any gratitude text. */
+function syncGratitudeStatus(log) {
+  const allFilled = ['g1', 'g2', 'g3'].every((k) => (log.journal[k] || '').trim().length > 0);
+  if (allFilled) {
+    log.gratitude = 'done';
+  } else if (log.gratitude === 'done') {
+    log.gratitude = 'undone';
+  }
 }
 
 /* ---------- Date helpers ---------- */
@@ -223,6 +239,11 @@ function renderToday() {
   const dayLabel = dayN === null ? 'Not started' : dayN < 1 ? `Starts in ${1 - dayN} day${1 - dayN === 1 ? '' : 's'}`
     : dayN > 75 ? 'Day 75 of 75 · complete' : `Day ${dayN} of 75`;
 
+  const arcStripHtml = ARCS.map((a) => `
+    <div class="arc-chip ${a.n === arc.n ? 'current' : ''}" data-action="nav-arc" data-key="${a.n}">Arc ${a.n}</div>`).join('');
+
+  const regularItems = ITEMS.filter((it) => it.key !== 'pause');
+
   return `
   <div class="screen">
     <div class="header row-between" style="align-items:flex-start;">
@@ -243,13 +264,15 @@ function renderToday() {
       </div>
     </div>
 
-    <div class="callout callout-sage" style="margin-top:16px;">
+    <div class="arc-strip">${arcStripHtml}</div>
+
+    <div class="callout callout-sage" style="margin-top:0;">
       <div class="field-label upper" style="color:var(--sage-dark);">Arc ${arc.n} · Days ${arc.start}–${arc.end}</div>
       <div style="font-size:14px;color:var(--sage-dark);margin-top:2px;">${arc.name}</div>
     </div>
 
     <div class="section" style="margin-top:0;">
-      ${ITEMS.map((it) => `
+      ${regularItems.map((it) => `
         <div class="item-row">
           ${checkBtnHtml(it.key, log[it.key])}
           <div class="item-icon">${icon(it.icon, 20)}</div>
@@ -258,22 +281,23 @@ function renderToday() {
             <div class="item-sub">${it.sub}</div>
           </div>
         </div>`).join('')}
+
+      <div class="item-row">
+        ${checkBtnHtml('pause', log.pause)}
+        <div class="item-text" data-action="nav" data-key="pause" style="cursor:pointer;display:flex;align-items:center;gap:12px;">
+          <div class="item-icon">${icon('heart', 20)}</div>
+          <div style="flex:1;min-width:0;">
+            <div class="item-title">Pause practice</div>
+            <div class="item-sub">Tap to open &middot; The Pause Practice</div>
+          </div>
+        </div>
+        ${log.pauseCount > 0 ? `<div class="tally-badge">${log.pauseCount}&times; today</div>` : ''}
+      </div>
     </div>
 
     <div class="callout callout-terracotta">
       ${icon('gratitude', 18)}
       <div>This week so far: <strong>${weekCCount} compassionate mark${weekCCount === 1 ? '' : 's'}</strong> noted — that&rsquo;s information, not failure.</div>
-    </div>
-
-    <div class="section nav-card" data-action="nav" data-key="pause">
-      <div class="row" style="gap:10px;">
-        <div class="nav-card-icon">${icon('heart', 17)}</div>
-        <div>
-          <div class="item-title">The Pause Practice</div>
-          <div class="item-sub">60–90 seconds, anytime</div>
-        </div>
-      </div>
-      <div style="color:#C9BFA8;">${icon('chevronRight', 18)}</div>
     </div>
   </div>`;
 }
@@ -294,15 +318,23 @@ function weekCompassionateCount(dayN) {
 
 function renderPause() {
   const s = ui.pauseStep;
-  const dots = [1, 2, 3, 4, 5].map((n) => `<div class="ob-dot ${s >= n ? 'on' : ''}" style="width:26px;"></div>`).join('');
+  const stepSeconds = PAUSE_STEP_MS / 1000;
+  const dots = [1, 2, 3, 4, 5].map((n) => {
+    const state = n < s ? 'done' : n === s ? 'current' : 'future';
+    const fillStyle = state === 'current' ? `style="animation-duration:${stepSeconds}s"` : '';
+    return `<div class="ob-dot ${state}"><div class="ob-dot-fill" ${fillStyle}></div></div>`;
+  }).join('');
   let body = '';
   let footer = '';
 
   if (s === 0) {
+    const today = todayKey();
+    const count = getLog(today).pauseCount;
     body = `
       <div class="ob-mark">${icon('heart', 52)}</div>
-      <h2 style="font-size:20px;margin-bottom:10px;">Your default 60&ndash;90 seconds</h2>
-      <div class="step-caption">Any time it helps: a missed habit, a harsh inner voice, work stress, body image, a sharp word at home. Pause here.</div>`;
+      <h2 style="font-size:20px;margin-bottom:10px;">Your default 90 seconds</h2>
+      <div class="step-caption">Any time it helps: a missed habit, a harsh inner voice, work stress, body image, a sharp word at home. Pause here — it plays through on its own.</div>
+      ${count > 0 ? `<div class="item-sub" style="margin-top:14px;">You&rsquo;ve done this ${count}&times; today.</div>` : ''}`;
     footer = `<div class="btn btn-primary" data-action="pause-begin">Begin</div>`;
   } else {
     const step = PAUSE_STEPS[s - 1];
@@ -327,52 +359,87 @@ function renderPause() {
   </div>`;
 }
 
+function clearPauseTimer() {
+  if (ui.pauseTimer) { clearTimeout(ui.pauseTimer); ui.pauseTimer = null; }
+}
+
+function schedulePauseAdvance() {
+  clearPauseTimer();
+  ui.pauseTimer = setTimeout(() => {
+    if (ui.pauseStep >= 5) {
+      completePauseRep();
+    } else {
+      ui.pauseStep += 1;
+      schedulePauseAdvance();
+      render();
+    }
+  }, PAUSE_STEP_MS);
+}
+
+function completePauseRep() {
+  clearPauseTimer();
+  const log = getLog(todayKey());
+  log.pauseCount = (log.pauseCount || 0) + 1;
+  log.pause = 'done';
+  saveState();
+  ui.pauseStep = 0;
+  render();
+}
+
 function handlePauseAction(action) {
-  if (action === 'pause-begin') ui.pauseStep = 1;
-  else if (action === 'pause-next') ui.pauseStep = Math.min(ui.pauseStep + 1, 5);
-  else if (action === 'pause-back') ui.pauseStep = Math.max(ui.pauseStep - 1, 0);
-  else if (action === 'pause-close') {
-    const log = getLog(todayKey());
-    log.pause = 'done';
-    saveState();
-    ui.pauseStep = 0;
+  if (action === 'pause-begin') { ui.pauseStep = 1; schedulePauseAdvance(); }
+  else if (action === 'pause-next') { clearPauseTimer(); ui.pauseStep = Math.min(ui.pauseStep + 1, 5); schedulePauseAdvance(); }
+  else if (action === 'pause-back') {
+    clearPauseTimer();
+    ui.pauseStep = Math.max(ui.pauseStep - 1, 0);
+    if (ui.pauseStep > 0) schedulePauseAdvance();
   }
+  else if (action === 'pause-close') { completePauseRep(); return; }
   render();
 }
 
 /* ---------- Journal ---------- */
 
-const JOURNAL_FIELDS = [
-  { key: 'g1', label: 'Vitamin G — gratitude 1', placeholder: 'Something specific from today', type: 'text' },
-  { key: 'g2', label: 'Vitamin G — gratitude 2', placeholder: 'Something specific from today', type: 'text' },
-  { key: 'g3', label: 'Vitamin G — gratitude 3', placeholder: 'Something specific from today', type: 'text' },
-  { key: 'difficulty', label: 'One difficulty, named simply', placeholder: 'No case-building — just the sentence.', type: 'textarea' },
-  { key: 'bodyFeel', label: 'Mindfulness — what I felt in the body was', placeholder: '…', type: 'text' },
-  { key: 'humanShare', label: 'Common humanity — a human in my place might also', placeholder: '…', type: 'text' },
-  { key: 'kindSentence', label: 'Kindness — what I’d say to a friend in this spot', placeholder: 'One sentence, said out loud.', type: 'textarea' },
-  { key: 'mealPlanNext', label: 'Tomorrow’s meal plan, in five words', placeholder: '…', type: 'text' }
+const GRATITUDE_FIELDS = [
+  { key: 'g1', placeholder: 'Something specific from today' },
+  { key: 'g2', placeholder: 'Something specific from today' },
+  { key: 'g3', placeholder: 'Something specific from today' }
 ];
+
+const JOURNAL_FIELDS = [
+  { key: 'difficulty', label: 'One difficulty, named simply', example: 'e.g. I struggled to get my walk in. / I was tempted by off-plan food.', placeholder: 'No case-building — just the sentence.', type: 'textarea' },
+  { key: 'bodyFeel', label: 'Mindfulness — what I felt in the body was', example: 'e.g. tight shoulders, a heavy feeling in my chest, restless legs.', placeholder: '…', type: 'text' },
+  { key: 'humanShare', label: 'Common humanity — a human in my place might also', example: 'e.g. skip a workout when exhausted, reach for comfort food under stress.', placeholder: '…', type: 'text' },
+  { key: 'kindSentence', label: 'Kindness — what I’d say to a friend in this spot', example: 'e.g. You’re doing your best with a hard week — rest counts too.', placeholder: 'One sentence, said out loud.', type: 'textarea' },
+  { key: 'mealPlanNext', label: 'Tomorrow’s meal plan, in five words', example: 'e.g. Eggs, salad, chicken, rice, fruit.', placeholder: '…', type: 'text' }
+];
+
+function checkCellHtml(it, on) {
+  return `<div id="check-cell-${it.key}" class="row-between" data-action="toggle-item" data-key="${it.key}" style="background:${on ? 'var(--sage-soft)' : 'var(--card)'};border:1px solid ${on ? '#C7DAC5' : 'var(--border)'};border-radius:11px;padding:9px 10px;cursor:pointer;">
+      <div style="font-size:12.5px;font-weight:500;color:${on ? 'var(--sage-dark)' : 'var(--ink-soft)'};">${it.label}</div>
+      <div style="width:18px;height:18px;border-radius:6px;background:${on ? 'var(--sage)' : '#D8D0BC'};flex-shrink:0;display:flex;align-items:center;justify-content:center;">${on ? icon('check', 12).replace('stroke="currentColor"', 'stroke="#FFFDF8"').replace('stroke-width="1.75"', 'stroke-width="3"') : ''}</div>
+    </div>`;
+}
 
 function renderJournal() {
   const today = todayKey();
   const log = getLog(today);
   const j = log.journal;
 
+  const gratitudeHtml = GRATITUDE_FIELDS.map((f, i) => {
+    const val = (j[f.key] || '').replace(/"/g, '&quot;');
+    return `<input type="text" data-field="${f.key}" placeholder="${f.placeholder}" value="${val}" style="${i > 0 ? 'margin-top:8px;' : ''}"/>`;
+  }).join('');
+
   const fieldsHtml = JOURNAL_FIELDS.map((f) => {
     const val = (j[f.key] || '').replace(/"/g, '&quot;');
     const control = f.type === 'textarea'
       ? `<textarea data-field="${f.key}" rows="2" placeholder="${f.placeholder}">${j[f.key] ? escapeHtml(j[f.key]) : ''}</textarea>`
       : `<input type="text" data-field="${f.key}" placeholder="${f.placeholder}" value="${val}"/>`;
-    return `<div class="section"><div class="field-label">${f.label}</div>${control}</div>`;
+    return `<div class="section"><div class="field-label">${f.label}</div><div class="field-example">${f.example}</div>${control}</div>`;
   }).join('');
 
-  const checksHtml = ITEMS.map((it) => {
-    const on = log[it.key] === 'done';
-    return `<div class="row-between" data-action="toggle-item" data-key="${it.key}" style="background:${on ? 'var(--sage-soft)' : 'var(--card)'};border:1px solid ${on ? '#C7DAC5' : 'var(--border)'};border-radius:11px;padding:9px 10px;cursor:pointer;">
-      <div style="font-size:12.5px;font-weight:500;color:${on ? 'var(--sage-dark)' : 'var(--ink-soft)'};">${it.label}</div>
-      <div style="width:18px;height:18px;border-radius:6px;background:${on ? 'var(--sage)' : '#D8D0BC'};flex-shrink:0;display:flex;align-items:center;justify-content:center;">${on ? icon('check', 12).replace('stroke="currentColor"', 'stroke="#FFFDF8"').replace('stroke-width="1.75"', 'stroke-width="3"') : ''}</div>
-    </div>`;
-  }).join('');
+  const checksHtml = ITEMS.map((it) => checkCellHtml(it, log[it.key] === 'done')).join('');
 
   return `
   <div class="screen">
@@ -382,6 +449,18 @@ function renderJournal() {
       <div class="subtitle">${formatDateLong(today)}</div>
     </div>
     <div class="callout callout-sage" style="margin-top:18px;">Five minutes. No essays required — concrete beats clever.</div>
+
+    <div class="section">
+      <div class="field-label">Vitamin G — three gratitudes</div>
+      ${gratitudeHtml}
+    </div>
+
+    <div class="journal-divider"></div>
+    <div class="section" style="margin-bottom:6px;">
+      <div class="eyebrow" style="margin-bottom:4px;">Self-Compassion Journal</div>
+      <div class="item-sub">This section is for you to journal your self-compassion journey — one honest sentence per prompt is plenty.</div>
+    </div>
+
     ${fieldsHtml}
     <div class="section">
       <div class="field-label">Tonight&rsquo;s seven</div>
@@ -706,7 +785,17 @@ document.addEventListener('click', (e) => {
   const action = el.dataset.action;
   const key = el.dataset.key;
 
-  if (action === 'nav') { navigate(key); return; }
+  if (action === 'nav') {
+    if (currentRoute() === 'pause' && key !== 'pause') clearPauseTimer();
+    navigate(key);
+    return;
+  }
+
+  if (action === 'nav-arc') {
+    ui.openArc = Number(key);
+    navigate('journey');
+    return;
+  }
 
   if (action.startsWith('ob-')) { handleOnboardAction(action, key); return; }
   if (action.startsWith('pause-')) { handlePauseAction(action); return; }
@@ -769,5 +858,23 @@ document.addEventListener('input', (e) => {
   // journal fields (today's log)
   const log = getLog(todayKey());
   log.journal[field] = val;
+
+  if (field === 'g1' || field === 'g2' || field === 'g3') {
+    const before = log.gratitude;
+    syncGratitudeStatus(log);
+    if (log.gratitude !== before) {
+      const it = ITEMS.find((x) => x.key === 'gratitude');
+      const cell = document.getElementById('check-cell-gratitude');
+      if (cell) cell.outerHTML = checkCellHtml(it, log.gratitude === 'done');
+      const ring = document.querySelector('.ring-fill');
+      if (ring) {
+        const doneCount = ITEMS.filter((x) => log[x.key] === 'done').length;
+        const circumference = 2 * Math.PI * 27;
+        ring.style.strokeDashoffset = circumference * (1 - doneCount / 7);
+        const label = document.querySelector('.ring-label');
+        if (label) label.textContent = `${doneCount}/7`;
+      }
+    }
+  }
   saveState();
 });

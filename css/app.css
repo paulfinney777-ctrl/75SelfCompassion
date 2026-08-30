@@ -262,8 +262,12 @@ button {
   flex-direction: column;
 }
 .ob-dots { padding: calc(20px + env(safe-area-inset-top, 0px)) 28px 0; display: flex; gap: 7px; min-height: 8px; }
-.ob-dot { width: 32px; height: 5px; border-radius: 3px; background: var(--border); }
+.ob-dot { width: 32px; height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; position: relative; }
 .ob-dot.on { background: var(--sage); }
+.ob-dot-fill { position: absolute; inset: 0; background: var(--sage); transform: scaleX(0); transform-origin: left; }
+.ob-dot.done .ob-dot-fill { transform: scaleX(1); }
+.ob-dot.current .ob-dot-fill { animation-name: pauseDotFill; animation-timing-function: linear; animation-fill-mode: forwards; }
+@keyframes pauseDotFill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .ob-body { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 20px 28px; overflow-y: auto; }
 .ob-mark {
   width: 104px; height: 104px; border-radius: 999px;
@@ -287,6 +291,49 @@ button {
   width: 32px; height: 32px; border-radius: 999px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   background: var(--sage-soft); color: var(--sage-dark);
+}
+
+/* Arc strip (Today) */
+.arc-strip {
+  margin: 14px 20px 12px;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+.arc-chip {
+  flex-shrink: 0;
+  padding: 7px 13px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.arc-chip.current { background: var(--sage); border-color: var(--sage); color: var(--card); }
+
+.tally-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--terracotta-text);
+  background: var(--terracotta-soft);
+  border-radius: 999px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+/* Journal */
+.journal-divider {
+  margin: 4px 20px 16px;
+  border-top: 1px solid var(--border);
+}
+.field-example {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--ink-faintest);
+  margin: -2px 0 8px;
 }
 
 /* Pause practice */

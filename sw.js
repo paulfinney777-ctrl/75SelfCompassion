@@ -1,4 +1,4 @@
-const CACHE = '75c-v1';
+const CACHE = '75c-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -21,17 +21,16 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
+// Network-first for the app shell: while iterating, a fresh load should always
+// show the latest push. Falls back to cache only when offline.
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request).then((cached) => {
-      const network = fetch(e.request)
-        .then((res) => {
-          if (res.ok) caches.open(CACHE).then((c) => c.put(e.request, res.clone()));
-          return res;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    fetch(e.request)
+      .then((res) => {
+        if (res.ok) caches.open(CACHE).then((c) => c.put(e.request, res.clone()));
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
