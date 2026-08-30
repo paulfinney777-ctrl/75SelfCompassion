@@ -732,10 +732,11 @@ function renderSettings() {
 
 /* ---------- Onboarding ---------- */
 
+const ONBOARD_LAST_STEP = 5;
+
 function renderOnboarding() {
   const s = ui.onboardStep;
-  const dots = s > 0 ? [1, 2, 3].map((n) => `<div class="ob-dot ${s >= n ? 'on' : ''}"></div>`).join('') : '';
-  const skip = s === 1 ? `<div class="ob-skip" data-action="ob-skip">Skip</div>` : '';
+  const dots = s > 0 ? [1, 2, 3, 4].map((n) => `<div class="ob-dot ${s >= n ? 'on' : ''}"></div>`).join('') : '';
 
   let body = '';
   let footer = '';
@@ -747,7 +748,7 @@ function renderOnboarding() {
         <div class="eyebrow" style="margin-bottom:8px;">Welcome</div>
         <h1 style="font-size:34px;line-height:1.2;margin-bottom:14px;">Self-Compassionate75</h1>
         <div class="step-caption">A 75-day practice in self-kindness, common humanity, and mindfulness — grounded in self-compassion research.</div>
-        <div class="item-sub" style="margin-top:10px;">Same daily container as 75 Hard. A different relationship to it.</div>
+        <div class="item-sub" style="margin-top:10px;">Same daily container as 75 Hard. A different relationship to it. Next up: a quick walkthrough of how it works, then your start date.</div>
       </div>
       <div class="about-text" style="text-align:center;margin-top:32px;">Independently developed. Not affiliated with or endorsed by any self-compassion research organization or program.</div>`;
     footer = `<div class="btn btn-primary" data-action="ob-next">Get Started</div>`;
@@ -761,6 +762,44 @@ function renderOnboarding() {
       <div class="ingredient-row" style="margin-bottom:0;"><div class="ingredient-icon" style="background:var(--terracotta-soft);color:var(--terracotta-text);">${icon('heart', 16)}</div><div><div class="item-title" style="font-size:15.5px;">Self-kindness</div><div class="item-sub">Meet it gently, not harshly</div></div></div>`;
     footer = navPair();
   } else if (s === 2) {
+    const features = [
+      ['clipboard', 'Today', 'Your daily checklist. Tap a circle to mark it done, tap again for a compassionate miss (C) instead of a failure.'],
+      ['heart', 'The Pause Practice', 'A 90-second guided reset, anytime you need it. It plays itself once you begin — use it as often as you like.'],
+      ['pages', 'Evening Journal', 'Three gratitudes plus a short self-compassion reflection, once a day. Fill in all three gratitudes and it checks itself off.'],
+      ['path', 'Journey', 'Your 75 days as five 15-day arcs. Tap any arc to see its day-by-day progress.'],
+      ['calendar', 'Sunday Review', 'A weekly 10-minute look back — what the week was actually like, and one kinder adjustment for the next.'],
+      ['gear', 'Settings', 'Change your start date, your strength-training days, and your reminders any time.']
+    ];
+    body = `
+      <div class="eyebrow" style="margin-bottom:8px;">How it works</div>
+      <h2 style="font-size:26px;line-height:1.28;margin-bottom:6px;">Six screens, one practice.</h2>
+      <div class="step-caption" style="margin-bottom:16px;">Here&rsquo;s what each one does.</div>
+      ${features.map(([ic, title, desc]) => `
+        <div class="ingredient-row" style="align-items:flex-start;">
+          <div class="ingredient-icon" style="margin-top:2px;">${icon(ic, 16)}</div>
+          <div><div class="item-title" style="font-size:15.5px;">${title}</div><div class="item-sub">${desc}</div></div>
+        </div>`).join('')}
+      <div class="callout callout-sage" style="margin:16px 0 0;padding:13px 16px;">
+        <div class="field-label upper" style="color:var(--sage-dark);margin-bottom:4px;">Every day, expect to</div>
+        <div style="font-size:14px;color:var(--sage-dark);line-height:1.6;">Drink a gallon of water, follow your meal plan, read 10 pages, write three gratitudes, walk 60 minutes, journal a few mindful minutes, and do one Pause Practice rep.</div>
+      </div>`;
+    footer = navPair();
+  } else if (s === 3) {
+    const liftCount = WEEKDAY_ORDER.filter((k) => state.liftDays[k]).length;
+    const canContinue = liftCount >= 3;
+    body = `
+      <div class="eyebrow" style="margin-bottom:8px;color:var(--terracotta-text);">Strength training</div>
+      <h2 style="font-size:26px;line-height:1.28;margin-bottom:10px;">Three sessions a week.</h2>
+      <div class="step-caption" style="margin-bottom:18px;">About 45 minutes, full body or push/pull/legs. Back-aware: no hero lifts on a healing spine. This is fierce compassion — you train because you care about the body that has to carry you to 100.</div>
+      <div class="card" style="padding:14px 16px;margin-bottom:14px;">
+        <div style="font-family:'Newsreader',serif;font-style:italic;font-size:15px;color:var(--sage-dark);line-height:1.5;margin-bottom:14px;">${liftPledgeSentence()}</div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">
+          ${WEEKDAY_ORDER.map((k) => `<div class="chip ${state.liftDays[k] ? 'on' : ''}" style="text-align:center;padding:10px 0;font-size:14.5px;" data-action="toggle-liftday" data-key="${k}">${WEEKDAY_LETTERS[k]}</div>`).join('')}
+        </div>
+      </div>
+      <div class="item-sub" style="color:${canContinue ? 'var(--ink-faint)' : 'var(--terracotta-text)'};font-weight:${canContinue ? '400' : '700'};">${canContinue ? 'You can change these any time in Settings.' : `Choose at least 3 days to continue (${liftCount} selected).`}</div>`;
+    footer = navPair(canContinue);
+  } else if (s === 4) {
     const opts = [['today', 'Start today'], ['tomorrow', 'Start tomorrow'], ['monday', 'Start next Monday']];
     body = `
       <div class="eyebrow" style="margin-bottom:8px;">Set your start</div>
@@ -772,7 +811,7 @@ function renderOnboarding() {
       <div class="field-label" style="margin-bottom:6px;">Or choose a date</div>
       <input type="date" data-field="ob:customDate" value="${ui.onboardCustomDate}"/>`;
     footer = navPair();
-  } else if (s === 3) {
+  } else if (s === 5) {
     const label = ui.onboardChoice === 'custom' ? (ui.onboardCustomDate || 'on your chosen date')
       : ui.onboardChoice === 'today' ? 'today' : ui.onboardChoice === 'tomorrow' ? 'tomorrow' : 'next Monday';
     body = `
@@ -780,22 +819,27 @@ function renderOnboarding() {
         <div class="ob-mark" style="background:var(--terracotta-soft);color:var(--terracotta-text);">${icon('check', 46)}</div>
         <div class="eyebrow" style="margin-bottom:8px;">You&rsquo;re set</div>
         <h2 style="font-size:27px;line-height:1.3;margin-bottom:14px;">Day 1 begins ${label}.</h2>
-        <div class="step-caption">Seventy-five days of showing up unevenly is the whole practice. You only leave if you decide to stop.</div>
+        <div class="step-caption" style="margin-bottom:14px;">Seventy-five days of showing up unevenly is the whole practice. You only leave if you decide to stop.</div>
+        <div class="item-sub">${liftPledgeSentence()}</div>
       </div>`;
     footer = `<div class="btn btn-primary" data-action="ob-finish">Enter Self-Compassionate75</div>`;
   }
 
   return `
   <div class="ob-wrap">
-    <div class="ob-dots row-between">${dots}${skip}</div>
+    <div class="ob-dots">${dots}</div>
     <div class="ob-body">${body}</div>
     <div class="ob-footer">${footer}</div>
   </div>`;
 
-  function navPair() {
+  function navPair(enabled) {
+    const nextEnabled = enabled !== false;
+    const nextBtn = nextEnabled
+      ? `<div class="btn btn-primary grow" data-action="ob-next">Next</div>`
+      : `<div class="btn btn-primary grow" style="opacity:0.45;cursor:default;">Next</div>`;
     return `<div style="display:flex;gap:10px;">
       <div class="btn btn-secondary" data-action="ob-back">Back</div>
-      <div class="btn btn-primary grow" data-action="ob-next">Next</div>
+      ${nextBtn}
     </div>`;
   }
 }
@@ -810,9 +854,11 @@ function resolveOnboardStartDate() {
 }
 
 function handleOnboardAction(action, key) {
-  if (action === 'ob-next') ui.onboardStep = Math.min(ui.onboardStep + 1, 3);
+  if (action === 'ob-next') {
+    if (ui.onboardStep === 3 && WEEKDAY_ORDER.filter((k) => state.liftDays[k]).length < 3) return render();
+    ui.onboardStep = Math.min(ui.onboardStep + 1, ONBOARD_LAST_STEP);
+  }
   else if (action === 'ob-back') ui.onboardStep = Math.max(ui.onboardStep - 1, 0);
-  else if (action === 'ob-skip') ui.onboardStep = 2;
   else if (action === 'ob-pick') ui.onboardChoice = key;
   else if (action === 'ob-finish') {
     state.startDate = resolveOnboardStartDate();
