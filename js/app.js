@@ -8,7 +8,7 @@ const ITEMS = [
   { key: 'pages', label: '10 pages', sub: 'Anything that feeds the inner life', icon: 'pages' },
   { key: 'gratitude', label: 'Vitamin G', sub: '3 written gratitudes', icon: 'gratitude' },
   { key: 'walk', label: '60-minute walk', sub: 'One hour, outside preferred', icon: 'walk' },
-  { key: 'cold', label: 'Cold close', sub: '≥ 60 seconds, end of shower', icon: 'cold' },
+  { key: 'journaling', label: 'Mindfulness journaling', sub: 'A few quiet minutes with the journal', icon: 'rings' },
   { key: 'pause', label: 'Pause practice', sub: 'One formal practice, 2–10 min', icon: 'heart' }
 ];
 
@@ -46,7 +46,8 @@ const ICONS = {
   path: '<path d="M4 20c3-6 5-10 8-10s5 4 8 10"/><circle cx="4" cy="20" r="1.3" fill="currentColor" stroke="none"/><circle cx="20" cy="20" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="10" r="1.3" fill="currentColor" stroke="none"/>',
   rings: '<circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="8.5"/>',
   circles: '<circle cx="9.5" cy="12" r="6"/><circle cx="15" cy="12" r="6"/>',
-  arrow: '<path d="M12 19V6"/><path d="M6 11.5l6-6.5 6 6.5"/>'
+  arrow: '<path d="M12 19V6"/><path d="M6 11.5l6-6.5 6 6.5"/>',
+  strength: '<path d="M6.5 9v6M17.5 9v6"/><rect x="3" y="7.5" width="3" height="9" rx="1"/><rect x="18" y="7.5" width="3" height="9" rx="1"/><path d="M6.5 12h11"/>'
 };
 
 function icon(name, size) {
@@ -58,18 +59,23 @@ function icon(name, size) {
 
 const STORAGE_KEY = '75c_state_v1';
 
+const WEEKDAY_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WEEKDAY_NAMES = { Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday' };
+const WEEKDAY_LETTERS = { Mon: 'M', Tue: 'T', Wed: 'W', Thu: 'T', Fri: 'F', Sat: 'S', Sun: 'S' };
+
 function defaultState() {
   return {
     onboarded: false,
     startDate: null, // 'YYYY-MM-DD'
     name: '',
     reminders: { morning: true, journal: true, pause: false },
-    logs: {} // dateKey -> { water,meal,pages,gratitude,walk,cold,pause: 'undone'|'done'|'c', journal: {...} }
+    liftDays: { Mon: true, Tue: false, Wed: true, Thu: false, Fri: true, Sat: false, Sun: false },
+    logs: {} // dateKey -> { water,meal,pages,gratitude,walk,journaling,pause,strength: 'undone'|'done'|'c', journal: {...} }
   };
 }
 
 let state = loadState();
-const ui = { onboardStep: 0, onboardChoice: 'today', onboardCustomDate: '', pauseStep: 0, pauseTimer: null, openArc: null, reviewExerciseOpen: false, liftDays: { M: true, T: false, W: true, T2: false, F: true, S: false, S2: false } };
+const ui = { onboardStep: 0, onboardChoice: 'today', onboardCustomDate: '', pauseStep: 0, pauseTimer: null, openArc: null, reviewExerciseOpen: false };
 const PAUSE_TOTAL_MS = 90000;
 const PAUSE_STEP_MS = PAUSE_TOTAL_MS / 5;
 
@@ -78,7 +84,11 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
-    return Object.assign(defaultState(), parsed, { reminders: Object.assign({ morning: true, journal: true, pause: false }, parsed.reminders || {}) });
+    const base = defaultState();
+    return Object.assign(base, parsed, {
+      reminders: Object.assign({ morning: true, journal: true, pause: false }, parsed.reminders || {}),
+      liftDays: Object.assign({}, base.liftDays, parsed.liftDays || {})
+    });
   } catch (e) {
     return defaultState();
   }
@@ -89,12 +99,13 @@ function saveState() {
 }
 
 function getLog(dateKey) {
-  if (!state.logs[dateKey]) {
-    state.logs[dateKey] = { water: 'undone', meal: 'undone', pages: 'undone', gratitude: 'undone', walk: 'undone', cold: 'undone', pause: 'undone', pauseCount: 0, journal: {} };
-  }
-  if (!state.logs[dateKey].journal) state.logs[dateKey].journal = {};
-  if (typeof state.logs[dateKey].pauseCount !== 'number') state.logs[dateKey].pauseCount = 0;
-  return state.logs[dateKey];
+  if (!state.logs[dateKey]) state.logs[dateKey] = {};
+  const log = state.logs[dateKey];
+  ITEMS.forEach((it) => { if (!(it.key in log)) log[it.key] = 'undone'; });
+  if (!('strength' in log)) log.strength = 'undone';
+  if (!log.journal) log.journal = {};
+  if (typeof log.pauseCount !== 'number') log.pauseCount = 0;
+  return log;
 }
 
 /** Recomputes the gratitude item's status from the three Vitamin G fields.
@@ -138,6 +149,19 @@ function formatDateLong(k) {
   const d = parseDateKey(k);
   return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
+const JS_WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; // Date#getDay(): 0 = Sunday
+function weekdayKeyFor(k) { return JS_WEEKDAY[parseDateKey(k).getDay()]; }
+function isLiftDay(k) { return !!state.liftDays[weekdayKeyFor(k)]; }
+
+function liftPledgeSentence() {
+  const chosen = WEEKDAY_ORDER.filter((k) => state.liftDays[k]).map((k) => WEEKDAY_NAMES[k]);
+  if (chosen.length === 0) return 'Pick the days you’re committing to below.';
+  const list = chosen.length === 1 ? chosen[0]
+    : chosen.length === 2 ? chosen.join(' and ')
+    : `${chosen.slice(0, -1).join(', ')}, and ${chosen[chosen.length - 1]}`;
+  return `I will protect and strengthen myself and do strength training on ${list}.`;
+}
+
 function nextMonday(fromKey) {
   const d = parseDateKey(fromKey);
   const day = d.getDay(); // 0 Sun .. 6 Sat
@@ -214,12 +238,12 @@ function renderTabBar(active) {
 function itemStyle(status) {
   if (status === 'done') return { bg: 'var(--sage)', border: 'var(--sage)' };
   if (status === 'c') return { bg: 'var(--terracotta)', border: 'var(--terracotta)' };
-  return { bg: 'var(--card)', border: '#C9BFA8' };
+  return { bg: 'var(--card)', border: '#B9AC9C' };
 }
 
 function checkBtnHtml(itemKey, status) {
   const cls = status === 'done' ? 'done' : status === 'c' ? 'c' : '';
-  const inner = status === 'done' ? icon('check', 17).replace('stroke="currentColor"', 'stroke="#FFFDF8"')
+  const inner = status === 'done' ? icon('check', 17).replace('stroke="currentColor"', 'stroke="#FBF7F0"')
     : status === 'c' ? '<span class="c-letter">C</span>' : '';
   return `<div class="check-btn ${cls}" data-action="toggle-item" data-key="${itemKey}">${inner}</div>`;
 }
@@ -248,7 +272,7 @@ function renderToday() {
   <div class="screen">
     <div class="header row-between" style="align-items:flex-start;">
       <div>
-        <div class="eyebrow">75 Compassionate</div>
+        <div class="eyebrow">Self-Compassionate75</div>
         <h1 class="page-title">Today</h1>
         <div class="subtitle">${dayLabel} · Arc ${arc.n}</div>
       </div>
@@ -268,7 +292,7 @@ function renderToday() {
 
     <div class="callout callout-sage" style="margin-top:0;">
       <div class="field-label upper" style="color:var(--sage-dark);">Arc ${arc.n} · Days ${arc.start}–${arc.end}</div>
-      <div style="font-size:14px;color:var(--sage-dark);margin-top:2px;">${arc.name}</div>
+      <div style="font-size:16px;color:var(--sage-dark);margin-top:2px;">${arc.name}</div>
     </div>
 
     <div class="section" style="margin-top:0;">
@@ -293,6 +317,16 @@ function renderToday() {
         </div>
         ${log.pauseCount > 0 ? `<div class="tally-badge">${log.pauseCount}&times; today</div>` : ''}
       </div>
+
+      ${isLiftDay(today) ? `
+      <div class="item-row">
+        ${checkBtnHtml('strength', log.strength)}
+        <div class="item-icon">${icon('strength', 20)}</div>
+        <div class="item-text">
+          <div class="item-title">Strength training</div>
+          <div class="item-sub">~45 min &middot; full body or push/pull/legs</div>
+        </div>
+      </div>` : ''}
     </div>
 
     <div class="callout callout-terracotta">
@@ -332,7 +366,7 @@ function renderPause() {
     const count = getLog(today).pauseCount;
     body = `
       <div class="ob-mark">${icon('heart', 52)}</div>
-      <h2 style="font-size:20px;margin-bottom:10px;">Your default 90 seconds</h2>
+      <h2 style="font-size:23px;margin-bottom:10px;">Your default 90 seconds</h2>
       <div class="step-caption">Any time it helps: a missed habit, a harsh inner voice, work stress, body image, a sharp word at home. Pause here — it plays through on its own.</div>
       ${count > 0 ? `<div class="item-sub" style="margin-top:14px;">You&rsquo;ve done this ${count}&times; today.</div>` : ''}`;
     footer = `<div class="btn btn-primary" data-action="pause-begin">Begin</div>`;
@@ -352,7 +386,7 @@ function renderPause() {
 
   return `
   <div class="screen" style="display:flex;flex-direction:column;min-height:100vh;min-height:100dvh;">
-    <div class="header"><div class="eyebrow">75 Compassionate</div><h1 class="page-title">The Pause Practice</h1></div>
+    <div class="header"><div class="eyebrow">Self-Compassionate75</div><h1 class="page-title">The Pause Practice</h1></div>
     <div class="ob-dots">${s > 0 ? dots : ''}</div>
     <div class="pause-body">${body}</div>
     <div class="ob-footer">${footer}</div>
@@ -415,9 +449,9 @@ const JOURNAL_FIELDS = [
 ];
 
 function checkCellHtml(it, on) {
-  return `<div id="check-cell-${it.key}" class="row-between" data-action="toggle-item" data-key="${it.key}" style="background:${on ? 'var(--sage-soft)' : 'var(--card)'};border:1px solid ${on ? '#C7DAC5' : 'var(--border)'};border-radius:11px;padding:9px 10px;cursor:pointer;">
-      <div style="font-size:12.5px;font-weight:500;color:${on ? 'var(--sage-dark)' : 'var(--ink-soft)'};">${it.label}</div>
-      <div style="width:18px;height:18px;border-radius:6px;background:${on ? 'var(--sage)' : '#D8D0BC'};flex-shrink:0;display:flex;align-items:center;justify-content:center;">${on ? icon('check', 12).replace('stroke="currentColor"', 'stroke="#FFFDF8"').replace('stroke-width="1.75"', 'stroke-width="3"') : ''}</div>
+  return `<div id="check-cell-${it.key}" class="row-between" data-action="toggle-item" data-key="${it.key}" style="background:${on ? 'var(--sage-soft)' : 'var(--card)'};border:1px solid ${on ? '#CFE0CC' : 'var(--border)'};border-radius:11px;padding:9px 10px;cursor:pointer;">
+      <div style="font-size:14.5px;font-weight:500;color:${on ? 'var(--sage-dark)' : 'var(--ink-soft)'};">${it.label}</div>
+      <div style="width:18px;height:18px;border-radius:6px;background:${on ? 'var(--sage)' : '#D2C6B7'};flex-shrink:0;display:flex;align-items:center;justify-content:center;">${on ? icon('check', 12).replace('stroke="currentColor"', 'stroke="#FBF7F0"').replace('stroke-width="1.75"', 'stroke-width="3"') : ''}</div>
     </div>`;
 }
 
@@ -439,12 +473,15 @@ function renderJournal() {
     return `<div class="section"><div class="field-label">${f.label}</div><div class="field-example">${f.example}</div>${control}</div>`;
   }).join('');
 
-  const checksHtml = ITEMS.map((it) => checkCellHtml(it, log[it.key] === 'done')).join('');
+  const checklistDefs = isLiftDay(today)
+    ? [...ITEMS, { key: 'strength', label: 'Strength training' }]
+    : ITEMS;
+  const checksHtml = checklistDefs.map((it) => checkCellHtml(it, log[it.key] === 'done')).join('');
 
   return `
   <div class="screen">
     <div class="header">
-      <div class="eyebrow">75 Compassionate</div>
+      <div class="eyebrow">Self-Compassionate75</div>
       <h1 class="page-title">Evening Page</h1>
       <div class="subtitle">${formatDateLong(today)}</div>
     </div>
@@ -492,7 +529,7 @@ function renderJourney() {
         const st = status === 'today' ? { bg: 'var(--card)', border: 'var(--sage)' } : itemStyle(status === 'done' ? 'done' : status === 'c' ? 'c' : 'undone');
         dots.push(`<div class="day-dot" style="background:${st.bg};border:1.5px solid ${st.border};"></div>`);
       }
-      inner = `<div class="field-label" style="margin:0 16px 10px;color:var(--ink-faint);font-weight:400;font-size:12.5px;">Daily practice: ${arc.practice}</div><div class="day-grid">${dots.join('')}</div>`;
+      inner = `<div class="field-label" style="margin:0 16px 10px;color:var(--ink-faint);font-weight:400;font-size:14.5px;">Daily practice: ${arc.practice}</div><div class="day-grid">${dots.join('')}</div>`;
     } else {
       inner = `<div class="arc-progress"><div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div></div>`;
     }
@@ -511,7 +548,7 @@ function renderJourney() {
   return `
   <div class="screen">
     <div class="header">
-      <div class="eyebrow">75 Compassionate</div>
+      <div class="eyebrow">Self-Compassionate75</div>
       <h1 class="page-title">Your Journey</h1>
       <div class="subtitle">${dayN === null ? 'Not started' : dayN > 75 ? 'Day 75 of 75' : `Day ${Math.max(dayN, 1)} of 75`}</div>
     </div>
@@ -521,14 +558,14 @@ function renderJourney() {
       <span><span class="dot" style="background:var(--sage);"></span>Done</span>
       <span><span class="dot" style="background:var(--terracotta);"></span>Compassionate</span>
       <span><span class="dot" style="background:var(--card);border:1.5px solid var(--sage);"></span>Today</span>
-      <span><span class="dot" style="background:var(--card);border:1.5px solid #D8D0BC;"></span>Ahead</span>
+      <span><span class="dot" style="background:var(--card);border:1.5px solid #D2C6B7;"></span>Ahead</span>
     </div>
     <div class="section nav-card" data-action="nav" data-key="review">
       <div class="row" style="gap:10px;">
         <div class="nav-card-icon">${icon('calendar', 17)}</div>
         <div><div class="item-title">Sunday Review</div><div class="item-sub">10 minutes, once a week</div></div>
       </div>
-      <div style="color:#C9BFA8;">${icon('chevronRight', 18)}</div>
+      <div style="color:#B9AC9C;">${icon('chevronRight', 18)}</div>
     </div>
     ${arcsHtml}
   </div>`;
@@ -563,16 +600,15 @@ function renderReview() {
   const cCount = weekCompassionateCount(dayN);
   const review = state.reviews && state.reviews[weekStart] || {};
 
-  const liftHtml = Object.keys(ui.liftDays).map((key) => {
-    const letter = key.replace('2', '');
-    const on = ui.liftDays[key];
-    return `<div class="chip ${on ? 'on' : ''}" style="text-align:center;padding:10px 0;font-size:12.5px;" data-action="toggle-lift" data-key="${key}">${letter}</div>`;
+  const liftHtml = WEEKDAY_ORDER.map((key) => {
+    const on = state.liftDays[key];
+    return `<div class="chip ${on ? 'on' : ''}" style="text-align:center;padding:10px 0;font-size:14.5px;" data-action="toggle-liftday" data-key="${key}">${WEEKDAY_LETTERS[key]}</div>`;
   }).join('');
 
   return `
   <div class="screen">
     <div class="header">
-      <div class="eyebrow">75 Compassionate</div>
+      <div class="eyebrow">Self-Compassionate75</div>
       <h1 class="page-title">Sunday Review</h1>
       <div class="subtitle">10 minutes · Days ${weekStart}–${weekEnd}</div>
     </div>
@@ -599,7 +635,7 @@ function renderReview() {
       </div>
       ${ui.reviewExerciseOpen ? `
       <div style="padding:0 16px 16px;">
-        <div style="font-size:13px;color:var(--ink-faint);line-height:1.5;margin-bottom:12px;">Two columns, side by side: what you&rsquo;d say to a friend who did what you did this week, and what you actually said to yourself.</div>
+        <div style="font-size:15px;color:var(--ink-faint);line-height:1.5;margin-bottom:12px;">Two columns, side by side: what you&rsquo;d say to a friend who did what you did this week, and what you actually said to yourself.</div>
         <div class="field-label">What I&rsquo;d say to a friend</div>
         <textarea data-field="review:friendText" rows="2" placeholder="…" style="margin-bottom:10px;">${escapeHtml(review.friendText || '')}</textarea>
         <div class="field-label">What I said to myself</div>
@@ -610,6 +646,7 @@ function renderReview() {
     </div>
     <div class="section">
       <div class="field-label">Set your three lift days</div>
+      <div style="font-family:'Newsreader',serif;font-style:italic;font-size:14px;color:var(--sage-dark);line-height:1.5;margin-bottom:10px;">${liftPledgeSentence()}</div>
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">${liftHtml}</div>
     </div>
   </div>`;
@@ -636,7 +673,7 @@ function renderSettings() {
   <div class="screen no-tabbar">
     <div class="header row" style="gap:12px;">
       <div class="back-btn" data-action="nav" data-key="today">${icon('back', 17)}</div>
-      <h1 style="font-size:23px;">Settings</h1>
+      <h1 style="font-size:26px;">Settings</h1>
     </div>
 
     <div class="section" style="margin-top:18px;display:flex;align-items:center;gap:14px;">
@@ -659,6 +696,17 @@ function renderSettings() {
     </div>
 
     <div class="section">
+      <div class="field-label upper" style="margin-bottom:8px;">Strength training</div>
+      <div class="item-sub" style="margin-bottom:10px;">Three sessions a week, about 45 minutes &mdash; full body or push/pull/legs. Back-aware: no hero lifts on a healing spine.</div>
+      <div class="card" style="padding:14px 16px;">
+        <div style="font-family:'Newsreader',serif;font-style:italic;font-size:15px;color:var(--sage-dark);line-height:1.5;margin-bottom:14px;">${liftPledgeSentence()}</div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">
+          ${WEEKDAY_ORDER.map((k) => `<div class="chip ${state.liftDays[k] ? 'on' : ''}" style="text-align:center;padding:10px 0;font-size:14.5px;" data-action="toggle-liftday" data-key="${k}">${WEEKDAY_LETTERS[k]}</div>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
       <div class="field-label upper" style="margin-bottom:8px;">Reminders</div>
       <div class="card" style="overflow:hidden;">
         ${toggleRow('morning', 'Morning check-in', 'Water, meal plan, gratitude')}
@@ -670,13 +718,13 @@ function renderSettings() {
 
     <div class="section">
       <div class="field-label upper" style="margin-bottom:8px;">Reading list</div>
-      <div class="reading-card"><div class="item-title" style="font-size:13.5px;">The Mindful Self-Compassion Workbook</div><div class="item-sub">Kristin Neff &amp; Christopher Germer</div></div>
-      <div class="reading-card"><div class="item-title" style="font-size:13.5px;">Self-Compassion</div><div class="item-sub">Kristin Neff</div></div>
+      <div class="reading-card"><div class="item-title" style="font-size:15.5px;">The Mindful Self-Compassion Workbook</div><div class="item-sub">Kristin Neff &amp; Christopher Germer</div></div>
+      <div class="reading-card"><div class="item-title" style="font-size:15.5px;">Self-Compassion</div><div class="item-sub">Kristin Neff</div></div>
     </div>
 
     <div class="section" style="margin-bottom:36px;">
       <div class="field-label upper" style="margin-bottom:8px;">About</div>
-      <div class="about-text">75 Compassionate &middot; version 0.1 (early build)</div>
+      <div class="about-text">Self-Compassionate75 &middot; version 0.1 (early build)</div>
       <div class="about-text" style="margin-top:6px;">Independently developed. Not affiliated with or endorsed by any self-compassion research organization or program. The reading list above credits the researchers whose published work informed this app.</div>
     </div>
   </div>`;
@@ -697,7 +745,7 @@ function renderOnboarding() {
       <div style="text-align:center;">
         <div class="ob-mark">${icon('gratitude', 46)}</div>
         <div class="eyebrow" style="margin-bottom:8px;">Welcome</div>
-        <h1 style="font-size:30px;line-height:1.2;margin-bottom:14px;">75 Compassionate</h1>
+        <h1 style="font-size:34px;line-height:1.2;margin-bottom:14px;">Self-Compassionate75</h1>
         <div class="step-caption">A 75-day practice in self-kindness, common humanity, and mindfulness — grounded in self-compassion research.</div>
         <div class="item-sub" style="margin-top:10px;">Same daily container as 75 Hard. A different relationship to it.</div>
       </div>
@@ -706,17 +754,17 @@ function renderOnboarding() {
   } else if (s === 1) {
     body = `
       <div class="eyebrow" style="margin-bottom:8px;color:var(--terracotta-text);">The one rule</div>
-      <h2 style="font-size:25px;line-height:1.28;margin-bottom:14px;">You don&rsquo;t restart the clock.</h2>
+      <h2 style="font-size:28px;line-height:1.28;margin-bottom:14px;">You don&rsquo;t restart the clock.</h2>
       <div class="step-caption" style="margin-bottom:22px;">Miss a day? Name it, take a 60-second Pause Practice, mark it with a <strong style="color:var(--ink);">C</strong> — not an X — and continue tomorrow. Consistency is the point. Perfection is not.</div>
-      <div class="ingredient-row"><div class="ingredient-icon">${icon('rings', 16)}</div><div><div class="item-title" style="font-size:13.5px;">Mindfulness</div><div class="item-sub">Notice what&rsquo;s actually here</div></div></div>
-      <div class="ingredient-row"><div class="ingredient-icon">${icon('circles', 16)}</div><div><div class="item-title" style="font-size:13.5px;">Common humanity</div><div class="item-sub">You&rsquo;re not the only one who struggles</div></div></div>
-      <div class="ingredient-row" style="margin-bottom:0;"><div class="ingredient-icon" style="background:var(--terracotta-soft);color:var(--terracotta-text);">${icon('heart', 16)}</div><div><div class="item-title" style="font-size:13.5px;">Self-kindness</div><div class="item-sub">Meet it gently, not harshly</div></div></div>`;
+      <div class="ingredient-row"><div class="ingredient-icon">${icon('rings', 16)}</div><div><div class="item-title" style="font-size:15.5px;">Mindfulness</div><div class="item-sub">Notice what&rsquo;s actually here</div></div></div>
+      <div class="ingredient-row"><div class="ingredient-icon">${icon('circles', 16)}</div><div><div class="item-title" style="font-size:15.5px;">Common humanity</div><div class="item-sub">You&rsquo;re not the only one who struggles</div></div></div>
+      <div class="ingredient-row" style="margin-bottom:0;"><div class="ingredient-icon" style="background:var(--terracotta-soft);color:var(--terracotta-text);">${icon('heart', 16)}</div><div><div class="item-title" style="font-size:15.5px;">Self-kindness</div><div class="item-sub">Meet it gently, not harshly</div></div></div>`;
     footer = navPair();
   } else if (s === 2) {
     const opts = [['today', 'Start today'], ['tomorrow', 'Start tomorrow'], ['monday', 'Start next Monday']];
     body = `
       <div class="eyebrow" style="margin-bottom:8px;">Set your start</div>
-      <h2 style="font-size:25px;line-height:1.28;margin-bottom:10px;">When does Day 1 begin?</h2>
+      <h2 style="font-size:28px;line-height:1.28;margin-bottom:10px;">When does Day 1 begin?</h2>
       <div class="step-caption" style="margin-bottom:20px;">Pick a start date — your 75 days count from there. Change it any time before you begin.</div>
       <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
         ${opts.map(([key, label]) => `<div class="chip ${ui.onboardChoice === key ? 'on' : ''}" data-action="ob-pick" data-key="${key}">${label}</div>`).join('')}
@@ -731,10 +779,10 @@ function renderOnboarding() {
       <div style="text-align:center;">
         <div class="ob-mark" style="background:var(--terracotta-soft);color:var(--terracotta-text);">${icon('check', 46)}</div>
         <div class="eyebrow" style="margin-bottom:8px;">You&rsquo;re set</div>
-        <h2 style="font-size:24px;line-height:1.3;margin-bottom:14px;">Day 1 begins ${label}.</h2>
+        <h2 style="font-size:27px;line-height:1.3;margin-bottom:14px;">Day 1 begins ${label}.</h2>
         <div class="step-caption">Seventy-five days of showing up unevenly is the whole practice. You only leave if you decide to stop.</div>
       </div>`;
-    footer = `<div class="btn btn-primary" data-action="ob-finish">Enter 75 Compassionate</div>`;
+    footer = `<div class="btn btn-primary" data-action="ob-finish">Enter Self-Compassionate75</div>`;
   }
 
   return `
@@ -817,7 +865,12 @@ document.addEventListener('click', (e) => {
 
   if (action === 'toggle-review-exercise') { ui.reviewExerciseOpen = !ui.reviewExerciseOpen; render(); return; }
 
-  if (action === 'toggle-lift') { ui.liftDays[key] = !ui.liftDays[key]; render(); return; }
+  if (action === 'toggle-liftday') {
+    state.liftDays[key] = !state.liftDays[key];
+    saveState();
+    render();
+    return;
+  }
 
   if (action === 'toggle-reminder') {
     state.reminders[key] = !state.reminders[key];
